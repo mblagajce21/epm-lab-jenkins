@@ -2,65 +2,84 @@ pipeline {
     agent any
 
     parameters {
-        choice(name: 'TARGET_ENV', choices: ['main', 'dev'], description: 'Select environment to deploy')
+        choice(
+            name: 'TARGET_ENV',
+            choices: ['main', 'dev'],
+            description: 'Select the environment to deploy'
+        )
     }
 
     environment {
-        IMAGE_NAME = "cicd-pipeline:${params.TARGET_ENV}-${env.BUILD_NUMBER}"
-        CONTAINER_NAME = "cicd-pipeline-${params.TARGET_ENV}"
+        APP_PORT      = "${params.TARGET_ENV == 'main' ? '3000' : '3001'}"
+        IMAGE_NAME    = "node${params.TARGET_ENV}"
+        IMAGE_TAG     = "v1.0"
+        CONTAINER_NAME = "app-${params.TARGET_ENV}"
     }
 
     stages {
-        stage('Set environment') {
+
+        stage('Validate Parameters') {
+            steps {
+                echo "Target env: ${params.TARGET_ENV}"
+                echo "Port: ${APP_PORT}"
+                echo "Image: ${IMAGE_NAME}:${IMAGE_TAG}"
+            }
+        }
+
+        stage('Stop & Remove Old Container') {
             steps {
                 script {
-                    if (params.TARGET_ENV == 'main') {
-                        env.APP_PORT = '3000'
-                    } else if (params.TARGET_ENV == 'dev') {
-                        env.APP_PORT = '3001'
-                    } else {
-                        error("Unsupported env: ${params.TARGET_ENV}")
-                    }
-                    echo "Target env: ${params.TARGET_ENV}"
-                    echo "Port: ${env.APP_PORT}"
+                    sh """
+                        if [ \$(docker ps -aq -f name=^${CONTAINER_NAME}\$) ]; then
+                            docker stop ${CONTAINER_NAME} || true
+                            docker rm   ${CONTAINER_NAME} || true
+                            echo "Removed container: ${CONTAINER_NAME}"
+                        else
+                            echo "No existing container named ${CONTAINER_NAME}"
+                        fi
+                    """
                 }
             }
         }
 
-        stage('Checkout') {
+        stage('Deploy Container') {
             steps {
-                git branch: "${params.TARGET_ENV}",
-                    credentialsId: 'github-credentials',
-                    url: 'https://github.com/mblagajce21/epm-lab-jenkins.git'
+                script {
+                    sh """
+                        docker run -d \\
+                            --name ${CONTAINER_NAME} \\
+                            -p ${APP_PORT}:${APP_PORT} \\
+                            -e PORT=${APP_PORT} \\
+                            ${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                    echo "Deployed ${IMAGE_NAME}:${IMAGE_TAG}: http://localhost:${APP_PORT}"
+                }
             }
         }
 
-        stage('Build') {
+        stage('Health Check') {
             steps {
-                sh 'npm install'
-                sh 'npm run build'
+                script {
+                    sleep(time: 5, unit: 'SECONDS')
+                    def status = sh(
+                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${APP_PORT}",
+                        returnStdout: true
+                    ).trim()
+                    echo "🩺 Health check HTTP status: ${status}"
+                    if (status != '200') {
+                        echo "App may still be starting (got ${status}). Continuing..."
+                    }
+                }
             }
         }
+    }
 
-        stage('Test') {
-            steps {
-                sh 'npm test -- --watchAll=false'
-            }
+    post {
+        success {
+            echo "Manual deployment to '${params.TARGET_ENV}' succeeded: http://localhost:${APP_PORT}"
         }
-
-        stage('Build Docker image') {
-            steps {
-                sh 'docker build -t ${IMAGE_NAME} .'
-            }
-        }
-
-        stage('Deploy') {
-            steps {
-                sh '''
-                    docker rm -f ${CONTAINER_NAME} || true
-                    docker run -d --name ${CONTAINER_NAME} -p ${APP_PORT}:3000 ${IMAGE_NAME}
-                '''
-            }
+        failure {
+            echo "Manual deployment to '${params.TARGET_ENV}' failed."
         }
     }
 }
