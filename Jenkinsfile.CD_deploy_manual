@@ -1,0 +1,66 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'TARGET_ENV', choices: ['main', 'dev'], description: 'Select environment to deploy')
+    }
+
+    environment {
+        IMAGE_NAME = "cicd-pipeline:${params.TARGET_ENV}-${env.BUILD_NUMBER}"
+        CONTAINER_NAME = "cicd-pipeline-${params.TARGET_ENV}"
+    }
+
+    stages {
+        stage('Set environment') {
+            steps {
+                script {
+                    if (params.TARGET_ENV == 'main') {
+                        env.APP_PORT = '3000'
+                    } else if (params.TARGET_ENV == 'dev') {
+                        env.APP_PORT = '3001'
+                    } else {
+                        error("Unsupported env: ${params.TARGET_ENV}")
+                    }
+                    echo "Target env: ${params.TARGET_ENV}"
+                    echo "Port: ${env.APP_PORT}"
+                }
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                git branch: "${params.TARGET_ENV}",
+                    credentialsId: 'github-credentials',
+                    url: 'https://github.com/mblagajce21/epm-lab-jenkins.git'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'npm install'
+                sh 'npm run build'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh 'npm test -- --watchAll=false'
+            }
+        }
+
+        stage('Build Docker image') {
+            steps {
+                sh 'docker build -t ${IMAGE_NAME} .'
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh '''
+                    docker rm -f ${CONTAINER_NAME} || true
+                    docker run -d --name ${CONTAINER_NAME} -p ${APP_PORT}:3000 ${IMAGE_NAME}
+                '''
+            }
+        }
+    }
+}
