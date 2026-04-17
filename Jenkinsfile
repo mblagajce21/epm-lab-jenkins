@@ -53,7 +53,7 @@ pipeline {
 
         stage('Test') {
             steps {
-                sh 'npm test -- --watchAll=false --passWithNoTests'
+                sh 'npm test -- --watchAll=false'
                 echo "Tests passed"
             }
         }
