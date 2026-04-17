@@ -40,7 +40,7 @@ pipeline {
             steps {
                 script {
                     def containerName = "app-${BRANCH}"
-                    def fullTag       = "${DH_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+                    def fullTag       = "${env.DOCKER_REPO}/${IMAGE_NAME}:${IMAGE_TAG}"
 
                     sh """
                         if [ \$(docker ps -aq -f name=^${containerName}\$) ]; then
