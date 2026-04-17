@@ -55,7 +55,7 @@ pipeline {
                             --name ${containerName} \\
                             -p ${env.APP_PORT}:${env.APP_PORT} \\
                             -e PORT=${env.APP_PORT} \\
-                            ${DH_USER}/${IMAGE_NAME}:${IMAGE_TAG}
+                            ${fullTag}
                     """
                     echo "Deployed ${fullTag}: http://localhost:${env.APP_PORT}"
                 }
