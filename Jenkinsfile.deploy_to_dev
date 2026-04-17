@@ -1,0 +1,87 @@
+pipeline {
+    agent any
+
+    environment {
+        BRANCH = "dev"
+        IMAGE_NAME = "nodedev"
+        IMAGE_TAG  = "v1.0"
+    }
+
+    stages {
+
+        stage('Set Environment') {
+            steps {
+                script {
+                    env.APP_PORT = '3001'
+                    echo "Branch=${BRANCH}, Port=${env.APP_PORT}"
+                }
+            }
+        }
+
+        stage('Pull Docker Image') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'dockerhub-login',
+                        usernameVariable: 'DH_USER',
+                        passwordVariable: 'DH_PASS'
+                    )]) {
+                        env.DOCKER_REPO = DH_USER
+                        sh '''
+                            echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+                            docker pull $DH_USER/${IMAGE_NAME}:${IMAGE_TAG}
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                script {
+                    def containerName = "app-${BRANCH}"
+                    def fullTag       = "${env.DOCKER_REPO}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+                    sh """
+                        if [ \$(docker ps -aq -f name=^${containerName}\$) ]; then
+                            docker stop ${containerName} || true
+                            docker rm   ${containerName} || true
+                            echo "Removed old container: ${containerName}"
+                        fi
+                    """
+
+                    sh """
+                        docker run -d \\
+                            --name ${containerName} \\
+                            -p ${env.APP_PORT}:${env.APP_PORT} \\
+                            -e PORT=${env.APP_PORT} \\
+                            ${fullTag}
+                    """
+                    echo "Deployed ${fullTag}: http://localhost:${env.APP_PORT}"
+                }
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                script {
+                    sleep(time: 5, unit: 'SECONDS')
+                    def status = sh(
+                        script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:${env.APP_PORT}",
+                        returnStdout: true
+                    ).trim()
+                    echo "Health check HTTP status: ${status}"
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Manual deployment to '${BRANCH}' succeeded: http://localhost:${env.APP_PORT}"
+        }
+        failure {
+            echo "Manual deployment to '${BRANCH}' failed."
+        }
+    }
+}

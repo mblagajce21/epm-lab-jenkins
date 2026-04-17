@@ -68,28 +68,38 @@ pipeline {
             }
         }
 
-        stage('Deploy') {
+        stage('Push to Docker Hub') {
             steps {
                 script {
-                    def containerName = "app-${BRANCH}"
-                    def fullTag       = "${IMAGE_NAME}:${IMAGE_TAG}"
+                    withCredentials([usernamePassword(
+                        credentialsId: 'dockerhub-login',
+                        usernameVariable: 'DH_USER',
+                        passwordVariable: 'DH_PASS'
+                    )]) {
+                        sh '''
+                            echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+                            docker tag ${IMAGE_NAME}:${IMAGE_TAG} $DH_USER/${IMAGE_NAME}:${IMAGE_TAG}
+                            docker push $DH_USER/${IMAGE_NAME}:${IMAGE_TAG}
+                        '''
+                        sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${DH_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+                        sh "docker push ${DH_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+                    }
+                }
+            }
+        }
 
-                    sh """
-                        if [ \$(docker ps -aq -f name=^${containerName}\$) ]; then
-                            docker stop ${containerName} || true
-                            docker rm   ${containerName} || true
-                            echo "Removed old container: ${containerName}"
-                        fi
-                    """
-
-                    sh """
-                        docker run -d \\
-                            --name ${containerName} \\
-                            -p ${env.APP_PORT}:${env.APP_PORT} \\
-                            -e PORT=${env.APP_PORT} \\
-                            ${fullTag}
-                    """
-                    echo "Deployed ${fullTag}: http://localhost:${env.APP_PORT}"
+        stage('Trigger deployment pipeline') {
+            steps {
+                script {
+                    if (env.BRANCH_NAME == 'main') {
+                        build job: 'Deploy_to_main', wait: false
+                        echo "Triggered Deploy_to_main"
+                    } else if (env.BRANCH_NAME == 'dev') {
+                        build job: 'Deploy_to_dev', wait: false
+                        echo "Triggered Deploy_to_dev"
+                    } else {
+                        error("Unknown branch for deployment: ${env.BRANCH_NAME}")
+                    }
                 }
             }
         }
