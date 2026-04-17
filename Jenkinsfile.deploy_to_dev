@@ -26,8 +26,11 @@ pipeline {
                         usernameVariable: 'DH_USER',
                         passwordVariable: 'DH_PASS'
                     )]) {
-                        sh "docker login -u ${DH_USER} -p ${DH_PASS}"
-                        sh "docker pull ${DH_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+                        env.DOCKER_REPO = DH_USER
+                        sh '''
+                            echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+                            docker pull $DH_USER/${IMAGE_NAME}:${IMAGE_TAG}
+                        '''
                     }
                 }
             }
@@ -54,7 +57,7 @@ pipeline {
                             -e PORT=${env.APP_PORT} \\
                             ${DH_USER}/${IMAGE_NAME}:${IMAGE_TAG}
                     """
-                    echo "Deployed ${DH_USER}/${IMAGE_NAME}:${IMAGE_TAG}: http://localhost:${env.APP_PORT}"
+                    echo "Deployed ${fullTag}: http://localhost:${env.APP_PORT}"
                 }
             }
         }
